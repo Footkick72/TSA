@@ -240,6 +240,7 @@ class AgentCollisionManager:
 
 class WorldManager:
     illegal_pixels = set()
+    seating_pixels = set()
 
     def __init__(self, image):
         arr = np.asarray(image)
@@ -248,6 +249,8 @@ class WorldManager:
                 px = arr[(WORLD_EXTENTS[1]-1)-y, x]
                 if px[0] == 0 and px[1] == 0 and px[2] == 0:
                     self.illegal_pixels.add((float(x), float(y)))
+                if px[0] == 255 and px[1] == 0 and px[2] == 0:
+                    self.seating_pixels.add((float(x), float(y)))
 
     def is_valid_location(self, point):
         x = floor(point[0])
@@ -381,24 +384,19 @@ agent_collisions = AgentCollisionManager(WORLD_EXTENTS[0], WORLD_EXTENTS[1])
 
 goal = [5, 110]
 
-percent_filled = 0.003
+percent_filled = 0.0005
 agents = []
 arr = np.asarray(Image.open(WORLD_FILE))
-for x in range(len(arr[0])):
-    for y in range(len(arr)):
-        px = arr[(WORLD_EXTENTS[1]-1)-y, x]
-        if px[0] == 255 and px[1] == 0 and px[2] == 0:
-            if random() < percent_filled:
-                pos = (x + 0.5, y + 0.5)
-                a = Agent(pos, AGENT_STEP, goal)
-                agents.append(a)
-                agent_collisions.register_member(a)
+for pos in world_collisions.seating_pixels:
+    if random() < percent_filled:
+        a = Agent((pos[0] + 0.5, pos[1] + 0.5), AGENT_STEP, goal)
+        agents.append(a)
+        agent_collisions.register_member(a)
 print(len(agents))
 
 agent_positions = [[] for _ in range(len(agents))]
 
-plt.imshow(plt.imread(WORLD_FILE), extent=[
-           0, WORLD_EXTENTS[0], 0, WORLD_EXTENTS[1]])
+plt.imshow(plt.imread(WORLD_FILE), extent=[0, WORLD_EXTENTS[0], 0, WORLD_EXTENTS[1]])
 plt.savefig("temp.png")
 plt.clf()
 frame = cv2.imread("temp.png")
