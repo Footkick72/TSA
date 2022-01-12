@@ -11,12 +11,11 @@ import cv2
 AGENT_RADIUS = 0.2  # size of agent (m)
 AGENT_MAX_ANGLE_CHANGE = pi/2  # maximum agent direction change
 AGENT_DISTANCE_WEIGHT = 0.6  # lower = more likely to slow down
-# additional distance the agent likes to keep to others (m)
-AGENT_COMFORTABLE_SPACING = 1.0
-# agent shift away from others (per step) (per person) (m)
-AGENT_SPACING_SHIFT = 0.1
+AGENT_COMFORTABLE_SPACING = 1.0 # additional distance the agent likes to keep to others (m)
+AGENT_SPACING_SHIFT = 0.1 # agent shift away from others (per step) (per person) (m)
 # AGENT_SPACING_WEIGHT = 0.2 # scalar for agent's direction shift to avoid people
 AGENT_STEP = 0.4  # step size of the agent (m)
+AGENT_SEATING_PENALTY = 5 # scalar for the agent's dislike for seats (1 implies no avoidance of seats)
 WORLD_FILE = "Stadium-map.png"
 WORLD_EXTENTS = Image.open(WORLD_FILE).size
 
@@ -87,17 +86,21 @@ class Agent:
                     people_pos_sum[1] += obstacle.y_pos
                     n_people += 1
         if n_people > 0:
-            people_center = [people_pos_sum[0] /
-                             n_people, people_pos_sum[1] / n_people]
-            avoidance_vector = [self.x_pos -
-                                people_center[0], self.y_pos - people_center[1]]
+            people_center = [people_pos_sum[0] / n_people, people_pos_sum[1] / n_people]
+            avoidance_vector = [self.x_pos - people_center[0], self.y_pos - people_center[1]]
             avoidance_dir = atan2(avoidance_vector[1], avoidance_vector[0])
-            shift = [cos(avoidance_dir) * AGENT_SPACING_SHIFT * n_people,
-                     sin(avoidance_dir) * AGENT_SPACING_SHIFT * n_people]
-            optimal_vector = [cos(self.desired_direction) * self.desired_step_size,
-                              sin(self.desired_direction) * self.desired_step_size]
-            shifted_vector = [optimal_vector[0] +
-                              shift[0], optimal_vector[1] + shift[1]]
+            shift = [
+                cos(avoidance_dir) * AGENT_SPACING_SHIFT * n_people,
+                sin(avoidance_dir) * AGENT_SPACING_SHIFT * n_people
+                ]
+            optimal_vector = [
+                cos(self.desired_direction) * self.desired_step_size,
+                sin(self.desired_direction) * self.desired_step_size
+                ]
+            shifted_vector = [
+                optimal_vector[0] + shift[0],
+                optimal_vector[1] + shift[1]
+                ]
             shifted_angle = atan2(shifted_vector[1], shifted_vector[0])
             shifted_length = sqrt(shifted_vector[0]**2 + shifted_vector[1]**2)
             # shifted_angle = max(min(shifted_angle, AGENT_MAX_ANGLE_CHANGE), -AGENT_MAX_ANGLE_CHANGE)
@@ -256,6 +259,11 @@ class WorldManager:
         x = floor(point[0])
         y = floor(point[1])
         return (x, y) not in self.illegal_pixels
+    
+    def is_seating_location(self, point):
+        x = floor(point[0])
+        y = floor(point[1])
+        return (x, y) in self.seating_pixels
 
     def compute_path(self, pos, goal):
         # A* algorithm
@@ -333,22 +341,23 @@ class AstarNode:
         if self.parent == None:
             self.static_cost = 0
         else:
-            self.static_cost = self.parent.static_cost + \
-                sqrt((self.pos[0]-self.parent.pos[0])**2 +
-                     (self.pos[1]-self.parent.pos[1])**2)
+            step_cost = sqrt((self.pos[0]-self.parent.pos[0])**2 + (self.pos[1]-self.parent.pos[1])**2)
+            if world_collisions.is_seating_location(self.pos):
+                step_cost *= AGENT_SEATING_PENALTY
+            self.static_cost = self.parent.static_cost + step_cost
         self.set_heuristic_cost(goal)
         self.set_cost()
 
     def set_parent(self, new_parent):
         self.parent = new_parent
-        self.static_cost = self.parent.static_cost + \
-            sqrt((self.pos[0]-self.parent.pos[0])**2 +
-                 (self.pos[1]-self.parent.pos[1])**2)
+        step_cost = sqrt((self.pos[0]-self.parent.pos[0])**2 + (self.pos[1]-self.parent.pos[1])**2)
+        if world_collisions.is_seating_location(self.pos):
+            step_cost *= AGENT_SEATING_PENALTY
+        self.static_cost = self.parent.static_cost + step_cost
         self.set_cost()
 
     def set_heuristic_cost(self, goal):
-        self.heuristic_cost = sqrt(
-            (self.pos[0]-goal[0])**2 + (self.pos[1]-goal[1])**2)
+        self.heuristic_cost = sqrt((self.pos[0]-goal[0])**2 + (self.pos[1]-goal[1])**2)
 
     def set_cost(self):
         self.cost = self.static_cost + self.heuristic_cost
@@ -384,11 +393,13 @@ agent_collisions = AgentCollisionManager(WORLD_EXTENTS[0], WORLD_EXTENTS[1])
 
 goal = [5, 110]
 
-percent_filled = 0.0005
+percent_filled = 0.1 # 0 - 1
 agents = []
 arr = np.asarray(Image.open(WORLD_FILE))
 for pos in world_collisions.seating_pixels:
     if random() < percent_filled:
+        if len(agents) % 100 == 0:
+            print(len(agents))
         a = Agent((pos[0] + 0.5, pos[1] + 0.5), AGENT_STEP, goal)
         agents.append(a)
         agent_collisions.register_member(a)
