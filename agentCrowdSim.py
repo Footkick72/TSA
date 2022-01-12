@@ -11,8 +11,8 @@ import cv2
 AGENT_RADIUS = 0.2  # size of agent (m)
 AGENT_MAX_ANGLE_CHANGE = pi/2  # maximum agent direction change
 AGENT_DISTANCE_WEIGHT = 0.6  # lower = more likely to slow down
-AGENT_COMFORTABLE_SPACING = 1.0 # additional distance the agent likes to keep to others (m)
-AGENT_SPACING_SHIFT = 0.1 # agent shift away from others (per step) (per person) (m)
+AGENT_COMFORTABLE_SPACING = 1.5 # additional distance the agent likes to keep to others (m)
+AGENT_SPACING_SHIFT = 0.3 # agent shift away from others (per step) (m)
 # AGENT_SPACING_WEIGHT = 0.2 # scalar for agent's direction shift to avoid people
 AGENT_STEP = 0.4  # step size of the agent (m)
 AGENT_SEATING_PENALTY = 5 # scalar for the agent's dislike for seats (1 implies no avoidance of seats)
@@ -90,8 +90,8 @@ class Agent:
             avoidance_vector = [self.x_pos - people_center[0], self.y_pos - people_center[1]]
             avoidance_dir = atan2(avoidance_vector[1], avoidance_vector[0])
             shift = [
-                cos(avoidance_dir) * AGENT_SPACING_SHIFT * n_people,
-                sin(avoidance_dir) * AGENT_SPACING_SHIFT * n_people
+                cos(avoidance_dir) * AGENT_SPACING_SHIFT,
+                sin(avoidance_dir) * AGENT_SPACING_SHIFT
                 ]
             optimal_vector = [
                 cos(self.desired_direction) * self.desired_step_size,
@@ -104,8 +104,8 @@ class Agent:
             shifted_angle = atan2(shifted_vector[1], shifted_vector[0])
             shifted_length = sqrt(shifted_vector[0]**2 + shifted_vector[1]**2)
             # shifted_angle = max(min(shifted_angle, AGENT_MAX_ANGLE_CHANGE), -AGENT_MAX_ANGLE_CHANGE)
-            shifted_length = min(shifted_length, self.desired_step_size)
-            return [shifted_length, shifted_angle]
+            shifted_length = max(min(shifted_length, self.desired_step_size), 0)
+            return [self.desired_step_size, shifted_angle]
         return [self.desired_step_size, self.desired_direction]
 
     def next_position(self, move):
@@ -393,7 +393,7 @@ agent_collisions = AgentCollisionManager(WORLD_EXTENTS[0], WORLD_EXTENTS[1])
 
 goal = [5, 110]
 
-percent_filled = 0.1 # 0 - 1
+percent_filled = 0.2 # 0 - 1
 agents = []
 arr = np.asarray(Image.open(WORLD_FILE))
 for pos in world_collisions.seating_pixels:
@@ -416,7 +416,7 @@ height, width, layers = frame.shape
 fourcc = cv2.VideoWriter_fourcc(*'mp4v')
 video = cv2.VideoWriter("movement.mp4", fourcc, 5, (width, height))
 
-time = 500
+time = 1000
 for t in range(time):
     print(str((t+1)/time * 100) + "%")
     for i, a in enumerate(agents):
