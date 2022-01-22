@@ -7,6 +7,8 @@ import numpy as np
 from PIL import Image
 import heapq
 import cv2
+import os
+import json
 
 AGENT_RADIUS = 0.2  # size of agent (m)
 AGENT_MAX_ANGLE_CHANGE = pi/2  # maximum agent direction change
@@ -16,7 +18,7 @@ AGENT_SPACING_SHIFT = 0.3 # agent shift away from others (per step) (m)
 # AGENT_SPACING_WEIGHT = 0.2 # scalar for agent's direction shift to avoid people
 AGENT_STEP = 0.4  # step size of the agent (m)
 AGENT_SEATING_PENALTY = 5 # scalar for the agent's dislike for seats (1 implies no avoidance of seats)
-WORLD_FILE = "Stadium-map.png"
+WORLD_FILE = "testMap.png"
 WORLD_EXTENTS = Image.open(WORLD_FILE).size
 
 values = {}
@@ -50,11 +52,15 @@ class Agent:
 
     def compute_path(self):
         global world_collisions
-        self.path = world_collisions.compute_path((round(self.x_pos), round(
-            self.y_pos)), (round(self.desired_location[0]), round(self.desired_location[1])))
+        path = world_collisions.get_path((round(self.x_pos), round(self.y_pos)), (round(self.desired_location[0]), round(self.desired_location[1])))
+        if path:
+            self.path = path
 
     def update(self):
         global agent_collisions
+        self.compute_path()
+        while len(self.path) != 0 and sqrt((self.x_pos - self.path[0][0])**2 + (self.y_pos - self.path[0][1])**2) < 2:
+            self.path.pop(0)
         if len(self.path) != 0:
             self.desired_direction = atan2(
                 self.path[0][1] - self.y_pos, self.path[0][0] - self.x_pos)
@@ -71,9 +77,6 @@ class Agent:
 
             self.desired_step_size = original_length
             self.desired_direction = original_direction
-
-            if sqrt((self.x_pos - self.path[0][0])**2 + (self.y_pos - self.path[0][1])**2) < 2:
-                self.path.pop(0)
 
     def shift_avoid_people(self):
         global agent_collisions
@@ -244,6 +247,8 @@ class AgentCollisionManager:
 class WorldManager:
     illegal_pixels = set()
     seating_pixels = set()
+    goals = []
+    paths = {}
 
     def __init__(self, image):
         arr = np.asarray(image)
@@ -254,7 +259,33 @@ class WorldManager:
                     self.illegal_pixels.add((float(x), float(y)))
                 if px[0] == 255 and px[1] == 0 and px[2] == 0:
                     self.seating_pixels.add((float(x), float(y)))
-
+                if px[0] == 0 and px[1] == 255 and px[2] == 0:
+                    self.goals.append((x, y))
+    
+    def read_paths(self):
+        if os.path.exists(WORLD_FILE[:-4] + "-pathdata.json"):
+            f = open(WORLD_FILE[:-4] + "-pathdata.json", "r")
+            self.paths = json.loads(f.read())
+            f.close()
+        else:
+            self.precompute_paths()
+    
+    def precompute_paths(self):
+        print("computing paths")
+        i = 0
+        for goal in self.goals:
+            for x in range(WORLD_EXTENTS[0]):
+                for y in range(WORLD_EXTENTS[1]):
+                    if self.is_valid_location((x,y)):
+                        path = self.compute_path((x,y), goal)
+                        self.paths[str((x,y,goal[0],goal[1]))] = path
+                        i += 1
+                        print(f"{100*i/(len(self.goals)*(WORLD_EXTENTS[0]*WORLD_EXTENTS[1]-len(self.illegal_pixels)))}%")
+        f = open(WORLD_FILE[:-4] + "-pathdata.json", "w")
+        f.write(json.dumps(self.paths))
+        f.close()
+        print("done")
+    
     def is_valid_location(self, point):
         x = floor(point[0])
         y = floor(point[1])
@@ -264,6 +295,13 @@ class WorldManager:
         x = floor(point[0])
         y = floor(point[1])
         return (x, y) in self.seating_pixels
+
+    def closest_goal(self, pos):
+        return self.goals[0]
+
+    def get_path(self, pos, goal):
+        if str((pos[0],pos[1],goal[0],goal[1])) in self.paths:
+            return self.paths[str((pos[0],pos[1],goal[0],goal[1]))]
 
     def compute_path(self, pos, goal):
         # A* algorithm
@@ -327,7 +365,6 @@ class WorldManager:
         # A* heuristic cost of a location relative to goal
         return sqrt((pos[0]-goal[0])**2 + (pos[1]-goal[1])**2)
 
-
 class AstarNode:
     pos = (0, 0)
     parent = None
@@ -387,56 +424,52 @@ class AstarNode:
     def __hash__(self):
         return hash(self.pos)
 
-
 world_collisions = WorldManager(Image.open(WORLD_FILE))
+world_collisions.read_paths()
 agent_collisions = AgentCollisionManager(WORLD_EXTENTS[0], WORLD_EXTENTS[1])
 
-goal = [5, 110]
+def run_sim(percent_filled, time):
+    agents = []
 
-percent_filled = 0.2 # 0 - 1
-agents = []
-arr = np.asarray(Image.open(WORLD_FILE))
-for pos in world_collisions.seating_pixels:
-    if random() < percent_filled:
-        if len(agents) % 100 == 0:
-            print(len(agents))
-        a = Agent((pos[0] + 0.5, pos[1] + 0.5), AGENT_STEP, goal)
-        agents.append(a)
-        agent_collisions.register_member(a)
-print(len(agents))
+    for pos in world_collisions.seating_pixels:
+        if random() < percent_filled:
+            if len(agents) % 100 == 0:
+                print(len(agents))
+            a = Agent((pos[0] + 0.5, pos[1] + 0.5), AGENT_STEP, world_collisions.closest_goal(pos))
+            agents.append(a)
+            agent_collisions.register_member(a)
+    print(len(agents))
 
-agent_positions = [[] for _ in range(len(agents))]
+    agent_positions = [[] for _ in range(len(agents))]
 
-plt.imshow(plt.imread(WORLD_FILE), extent=[0, WORLD_EXTENTS[0], 0, WORLD_EXTENTS[1]])
-plt.savefig("temp.png")
-plt.clf()
-frame = cv2.imread("temp.png")
-height, width, layers = frame.shape
-
-fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-video = cv2.VideoWriter("movement.mp4", fourcc, 5, (width, height))
-
-time = 1000
-for t in range(time):
-    print(str((t+1)/time * 100) + "%")
-    for i, a in enumerate(agents):
-        a.update()
-        agent_positions[i].append((a.x_pos, a.y_pos))
-
-    plt.scatter(list(map(lambda x: x[-1][0], agent_positions)),
-                list(map(lambda x: x[-1][1], agent_positions)), s=4)
-    plt.imshow(plt.imread(WORLD_FILE), extent=[
-               0, WORLD_EXTENTS[0], 0, WORLD_EXTENTS[1]])
+    plt.imshow(plt.imread(WORLD_FILE), extent=[0, WORLD_EXTENTS[0], 0, WORLD_EXTENTS[1]])
     plt.savefig("temp.png")
     plt.clf()
-    video.write(cv2.imread("temp.png"))
+    frame = cv2.imread("temp.png")
+    height, width, layers = frame.shape
 
-cv2.destroyAllWindows()
-video.release()
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    video = cv2.VideoWriter("movement.mp4", fourcc, 15, (width, height))
 
-for pos_list in agent_positions:
-    plt.plot(list(map(lambda x: x[0], pos_list)), list(
-        map(lambda x: x[1], pos_list)), 'o-', linewidth=1, markersize=3)
-plt.imshow(plt.imread(WORLD_FILE), extent=[
-           0, WORLD_EXTENTS[0], 0, WORLD_EXTENTS[1]])
-plt.show()
+    for t in range(time):
+        print(str((t+1)/time * 100) + "%")
+        for i, a in enumerate(agents):
+            a.update()
+            agent_positions[i].append((a.x_pos, a.y_pos))
+
+        plt.scatter(list(map(lambda x: x[-1][0], agent_positions)), list(map(lambda x: x[-1][1], agent_positions)), s=4)
+        plt.imshow(plt.imread(WORLD_FILE), extent=[0, WORLD_EXTENTS[0], 0, WORLD_EXTENTS[1]])
+        plt.savefig("temp.png")
+        plt.clf()
+        video.write(cv2.imread("temp.png"))
+
+    cv2.destroyAllWindows()
+    video.release()
+
+    for pos_list in agent_positions:
+        plt.plot(list(map(lambda x: x[0], pos_list)), list(map(lambda x: x[1], pos_list)), 'o-', linewidth=1, markersize=3)
+    plt.imshow(plt.imread(WORLD_FILE), extent=[0, WORLD_EXTENTS[0], 0, WORLD_EXTENTS[1]])
+    plt.show()
+
+if __name__ == "__main__":
+    run_sim(1.0, 200)
