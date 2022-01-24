@@ -18,7 +18,7 @@ AGENT_SPACING_SHIFT = 0.3 # agent shift away from others (per step) (m)
 # AGENT_SPACING_WEIGHT = 0.2 # scalar for agent's direction shift to avoid people
 AGENT_STEP = 0.4  # step size of the agent (m)
 AGENT_SEATING_PENALTY = 5 # scalar for the agent's dislike for seats (1 implies no avoidance of seats)
-WORLD_FILE = "testMap.png"
+WORLD_FILE = "Stadium-map.png"
 WORLD_EXTENTS = Image.open(WORLD_FILE).size
 
 values = {}
@@ -43,6 +43,7 @@ class Agent:
     collision_grid_pos = (0, 0)
     desired_direction = 0
     path = None
+    finished = False
 
     def __init__(self, pos, speed, goal):
         self.x_pos, self.y_pos = pos
@@ -58,25 +59,31 @@ class Agent:
 
     def update(self):
         global agent_collisions
+        
         self.compute_path()
-        while len(self.path) != 0 and sqrt((self.x_pos - self.path[0][0])**2 + (self.y_pos - self.path[0][1])**2) < 2:
+        while len(self.path) > 1 and sqrt((self.x_pos - self.path[0][0])**2 + (self.y_pos - self.path[0][1])**2) < 2:
             self.path.pop(0)
-        if len(self.path) != 0:
-            self.desired_direction = atan2(
-                self.path[0][1] - self.y_pos, self.path[0][0] - self.x_pos)
+        
+        self.desired_direction = atan2(self.path[0][1] - self.y_pos, self.path[0][0] - self.x_pos)
 
-            shift = self.shift_avoid_people()
-            original_length = self.desired_step_size
-            original_direction = self.desired_direction
-            self.desired_step_size = shift[0]
-            self.desired_direction = shift[1]
+        shift = self.shift_avoid_people()
+        original_length = self.desired_step_size
+        original_direction = self.desired_direction
+        self.desired_step_size = shift[0]
+        self.desired_direction = shift[1]
 
-            move = self.find_next_move()
-            self.x_pos, self.y_pos = self.next_position(move)
-            agent_collisions.check_for_updates(self)
+        move = self.find_next_move()
+        self.x_pos, self.y_pos = self.next_position(move)
+        agent_collisions.check_for_updates(self)
 
-            self.desired_step_size = original_length
-            self.desired_direction = original_direction
+        self.desired_step_size = original_length
+        self.desired_direction = original_direction
+        
+        if len(self.path) == 1 and sqrt((self.x_pos - self.path[0][0])**2 + (self.y_pos - self.path[0][1])**2) < 0.5:
+            # Reached the goal, now to delete ourselves
+            agent_collisions.deregister_member(self)
+            self.finished = True
+
 
     def shift_avoid_people(self):
         global agent_collisions
@@ -183,8 +190,7 @@ class AgentCollisionManager:
             int(y/self.square_side))] for _ in range(int(x/self.square_side))]
 
     def check_for_updates(self, member: Agent):
-        square = self.squares[member.collision_grid_pos[0]
-                              ][member.collision_grid_pos[1]]
+        square = self.squares[member.collision_grid_pos[0]][member.collision_grid_pos[1]]
         if not self.point_in_square([member.x_pos, member.y_pos], member.collision_grid_pos):
             square.remove(member)
 
@@ -205,6 +211,9 @@ class AgentCollisionManager:
                 if self.point_in_square([member.x_pos, member.y_pos], coord):
                     self.squares[coord[0]][coord[1]].append(member)
                     member.collision_grid_pos = coord
+    
+    def deregister_member(self, member: Agent):
+        self.squares[member.collision_grid_pos[0]][member.collision_grid_pos[1]].remove(member)
 
     def point_in_square(self, pos, index):
         bounds = self.get_square_bounds(index)
@@ -297,8 +306,14 @@ class WorldManager:
         return (x, y) in self.seating_pixels
 
     def closest_goal(self, pos):
-        return self.goals[0]
-
+        best = 0
+        distance = 1e100
+        for i,g in enumerate(self.goals):
+            if (g[0]-pos[0])**2 + (g[1]-pos[1])**2 < distance:
+                distance = (g[0]-pos[0])**2 + (g[1]-pos[1])**2
+                best = i
+        return self.goals[best]
+    
     def get_path(self, pos, goal):
         if str((pos[0],pos[1],goal[0],goal[1])) in self.paths:
             return self.paths[str((pos[0],pos[1],goal[0],goal[1]))]
@@ -433,8 +448,6 @@ def run_sim(percent_filled, time):
 
     for pos in world_collisions.seating_pixels:
         if random() < percent_filled:
-            if len(agents) % 100 == 0:
-                print(len(agents))
             a = Agent((pos[0] + 0.5, pos[1] + 0.5), AGENT_STEP, world_collisions.closest_goal(pos))
             agents.append(a)
             agent_collisions.register_member(a)
@@ -454,8 +467,9 @@ def run_sim(percent_filled, time):
     for t in range(time):
         print(str((t+1)/time * 100) + "%")
         for i, a in enumerate(agents):
-            a.update()
-            agent_positions[i].append((a.x_pos, a.y_pos))
+            if not a.finished:
+                a.update()
+                agent_positions[i].append((a.x_pos, a.y_pos))
 
         plt.scatter(list(map(lambda x: x[-1][0], agent_positions)), list(map(lambda x: x[-1][1], agent_positions)), s=4)
         plt.imshow(plt.imread(WORLD_FILE), extent=[0, WORLD_EXTENTS[0], 0, WORLD_EXTENTS[1]])

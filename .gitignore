@@ -1,3 +1,4 @@
 .vscode/*
 temp.png
 *-pathdata.json
+.DS_Store
