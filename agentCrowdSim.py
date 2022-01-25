@@ -18,6 +18,8 @@ AGENT_SPACING_SHIFT = 0.3 # agent shift away from others (per step) (m)
 # AGENT_SPACING_WEIGHT = 0.2 # scalar for agent's direction shift to avoid people
 AGENT_STEP = 0.4  # step size of the agent (m)
 AGENT_SEATING_PENALTY = 5 # scalar for the agent's dislike for seats (1 implies no avoidance of seats)
+AGENT_PATH_LOOKAHEAD = 2 # number of steps ahead of current path location the agent tries to move to
+AGENT_STUCK_THRESHOLD = 6 # how quickly the agent decides it is stuck and changes to a more direct pathing
 WORLD_FILE = "Stadium-map.png"
 WORLD_EXTENTS = Image.open(WORLD_FILE).size
 
@@ -44,6 +46,7 @@ class Agent:
     desired_direction = 0
     path = None
     finished = False
+    stuck_factor = 0
 
     def __init__(self, pos, speed, goal):
         self.x_pos, self.y_pos = pos
@@ -55,16 +58,30 @@ class Agent:
         global world_collisions
         path = world_collisions.get_path((floor(self.x_pos), floor(self.y_pos)), (floor(self.desired_location[0]), floor(self.desired_location[1])))
         if path:
-            self.path = path
+            if path == self.path:
+                self.stuck_factor += 1
+            else:
+                self.path = path
+                self.stuck_factor = 0
 
     def update(self):
         global agent_collisions
         
         self.compute_path()
-        while len(self.path) > 1 and sqrt((self.x_pos - self.path[0][0])**2 + (self.y_pos - self.path[0][1])**2) < 0.5:
-            self.path.pop(0)
+
+        if len(self.path) == 1:
+            agent_collisions.deregister_member(self)
+            self.finished = True
+            return
         
-        self.desired_direction = atan2(self.path[0][1] - self.y_pos, self.path[0][0] - self.x_pos)
+        # self.path.pop(0)
+        # while len(self.path) > 1 and sqrt((self.x_pos - self.path[0][0])**2 + (self.y_pos - self.path[0][1])**2) < 0.5:
+        #     self.path.pop(0)
+        
+        lookahead = min(len(self.path)-1,AGENT_PATH_LOOKAHEAD)
+        if self.stuck_factor >= AGENT_STUCK_THRESHOLD:
+            lookahead = 1
+        self.desired_direction = atan2(self.path[lookahead][1]+0.5 - self.y_pos, self.path[lookahead][0]+0.5 - self.x_pos)
 
         shift = self.shift_avoid_people()
         original_length = self.desired_step_size
@@ -79,10 +96,10 @@ class Agent:
         self.desired_step_size = original_length
         self.desired_direction = original_direction
         
-        if len(self.path) == 1 and sqrt((self.x_pos - self.path[0][0])**2 + (self.y_pos - self.path[0][1])**2) < 0.5:
-            # Reached the goal, now to delete ourselves
-            agent_collisions.deregister_member(self)
-            self.finished = True
+        # if len(self.path) == 1 and sqrt((self.x_pos - self.path[0][0])**2 + (self.y_pos - self.path[0][1])**2) < 0.5:
+        #     # Reached the goal, now to delete ourselves
+        #     agent_collisions.deregister_member(self)
+        #     self.finished = True
 
 
     def shift_avoid_people(self):
@@ -358,10 +375,6 @@ class WorldManager:
             (pos[0] + 1, pos[1] + 1)
         ]
 
-    def cost(self, pos, goal):
-        # A* heuristic cost of a location relative to goal
-        return sqrt((pos[0]-goal[0])**2 + (pos[1]-goal[1])**2)
-
 class DijkstraNode:
     pos = (0, 0)
     parent = None
@@ -462,4 +475,4 @@ def run_sim(percent_filled, time):
     plt.show()
 
 if __name__ == "__main__":
-    run_sim(0.05, 300)
+    run_sim(0.01, 200)
