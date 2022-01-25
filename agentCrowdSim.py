@@ -53,7 +53,7 @@ class Agent:
 
     def compute_path(self):
         global world_collisions
-        path = world_collisions.get_path((round(self.x_pos), round(self.y_pos)), (round(self.desired_location[0]), round(self.desired_location[1])))
+        path = world_collisions.get_path((floor(self.x_pos), floor(self.y_pos)), (floor(self.desired_location[0]), floor(self.desired_location[1])))
         if path:
             self.path = path
 
@@ -61,7 +61,7 @@ class Agent:
         global agent_collisions
         
         self.compute_path()
-        while len(self.path) > 1 and sqrt((self.x_pos - self.path[0][0])**2 + (self.y_pos - self.path[0][1])**2) < 2:
+        while len(self.path) > 1 and sqrt((self.x_pos - self.path[0][0])**2 + (self.y_pos - self.path[0][1])**2) < 0.5:
             self.path.pop(0)
         
         self.desired_direction = atan2(self.path[0][1] - self.y_pos, self.path[0][0] - self.x_pos)
@@ -280,20 +280,12 @@ class WorldManager:
             self.precompute_paths()
     
     def precompute_paths(self):
-        print("computing paths")
-        i = 0
         for goal in self.goals:
-            for x in range(WORLD_EXTENTS[0]):
-                for y in range(WORLD_EXTENTS[1]):
-                    if self.is_valid_location((x,y)):
-                        path = self.compute_path((x,y), goal)
-                        self.paths[str((x,y,goal[0],goal[1]))] = path
-                        i += 1
-                        print(f"{100*i/(len(self.goals)*(WORLD_EXTENTS[0]*WORLD_EXTENTS[1]-len(self.illegal_pixels)))}%")
-        f = open(WORLD_FILE[:-4] + "-pathdata.json", "w")
-        f.write(json.dumps(self.paths))
-        f.close()
-        print("done")
+            print("computing paths to:", goal)
+            self.compute_paths(goal)
+        print("done computing paths")
+        with open(WORLD_FILE[:-4] + "-pathdata.json", "w") as f:
+            f.write(json.dumps(self.paths))
     
     def is_valid_location(self, point):
         x = floor(point[0])
@@ -318,22 +310,22 @@ class WorldManager:
         if str((pos[0],pos[1],goal[0],goal[1])) in self.paths:
             return self.paths[str((pos[0],pos[1],goal[0],goal[1]))]
 
-    def compute_path(self, pos, goal):
-        # A* algorithm
-        frontier = [AstarNode(pos, None, goal)]
+    def compute_paths(self, goal):
+        # Djikstra's algorithm
+        # Computes every path to this goal
+        frontier = [DijkstraNode(goal, None)]
         heapq.heapify(frontier)
         frontier_set = set(frontier)
         visited = set()
 
-        done = False
-        while len(frontier) != 0 and not done:
+        while len(frontier) != 0:
             next_node = heapq.heappop(frontier)
             visited.add(next_node)
             frontier_set.remove(next_node)
             for neighbor in self.neighbors(next_node.pos):
                 if not self.is_valid_location(neighbor):
                     continue
-                n = AstarNode(neighbor, next_node, goal)
+                n = DijkstraNode(neighbor, next_node)
                 if n in visited:
                     continue
                 if n not in frontier_set:
@@ -345,24 +337,14 @@ class WorldManager:
                             if e > n:
                                 e.set_parent(next_node)
                             break
-            if AstarNode(goal, None, goal) in visited:
-                done = True
-
-        if done:
-            node_path = []
-            for e in visited:
-                if e == AstarNode(goal, None, goal):
-                    node_path.append(e)
-                    break
-            while node_path[-1].parent != None:
-                node_path.append(node_path[-1].parent)
-            node_path.reverse()
-            path = []
-            for node in node_path:
-                path.append(node.pos)
-            return path
-        else:
-            return None
+        
+        for node in visited:
+            last_node = node
+            path = [last_node.pos]
+            while last_node.parent != None:
+                last_node = last_node.parent
+                path.append(last_node.pos)
+            self.paths[str((node.pos[0], node.pos[1], goal[0], goal[1]))] = path
 
     def neighbors(self, pos):
         return [
@@ -380,47 +362,36 @@ class WorldManager:
         # A* heuristic cost of a location relative to goal
         return sqrt((pos[0]-goal[0])**2 + (pos[1]-goal[1])**2)
 
-class AstarNode:
+class DijkstraNode:
     pos = (0, 0)
     parent = None
-    static_cost = 0
-    heuristic_cost = 0
     cost = 0
 
-    def __init__(self, pos, parent, goal):
+    def __init__(self, pos, parent):
         self.pos = pos
         self.parent = parent
         if self.parent == None:
-            self.static_cost = 0
+            self.cost = 0
         else:
-            step_cost = sqrt((self.pos[0]-self.parent.pos[0])**2 + (self.pos[1]-self.parent.pos[1])**2)
-            if world_collisions.is_seating_location(self.pos):
-                step_cost *= AGENT_SEATING_PENALTY
-            self.static_cost = self.parent.static_cost + step_cost
-        self.set_heuristic_cost(goal)
-        self.set_cost()
+            self.set_cost()
 
     def set_parent(self, new_parent):
         self.parent = new_parent
+        self.set_cost()
+
+    def set_cost(self):
         step_cost = sqrt((self.pos[0]-self.parent.pos[0])**2 + (self.pos[1]-self.parent.pos[1])**2)
         if world_collisions.is_seating_location(self.pos):
             step_cost *= AGENT_SEATING_PENALTY
-        self.static_cost = self.parent.static_cost + step_cost
-        self.set_cost()
-
-    def set_heuristic_cost(self, goal):
-        self.heuristic_cost = sqrt((self.pos[0]-goal[0])**2 + (self.pos[1]-goal[1])**2)
-
-    def set_cost(self):
-        self.cost = self.static_cost + self.heuristic_cost
+        self.cost = self.parent.cost + step_cost
 
     def __eq__(self, other) -> bool:
-        if type(other) == AstarNode:
+        if type(other) == DijkstraNode:
             return self.pos == other.pos
         return False
 
     def __ne__(self, other) -> bool:
-        if type(other) == AstarNode:
+        if type(other) == DijkstraNode:
             return self.pos != other.pos
         return True
 
@@ -466,10 +437,15 @@ def run_sim(percent_filled, time):
 
     for t in range(time):
         print(str((t+1)/time * 100) + "%")
+        done = True
         for i, a in enumerate(agents):
             if not a.finished:
+                done = False
                 a.update()
                 agent_positions[i].append((a.x_pos, a.y_pos))
+        
+        if done:
+            break
 
         plt.scatter(list(map(lambda x: x[-1][0], agent_positions)), list(map(lambda x: x[-1][1], agent_positions)), s=4)
         plt.imshow(plt.imread(WORLD_FILE), extent=[0, WORLD_EXTENTS[0], 0, WORLD_EXTENTS[1]])
@@ -486,4 +462,4 @@ def run_sim(percent_filled, time):
     plt.show()
 
 if __name__ == "__main__":
-    run_sim(1.0, 200)
+    run_sim(0.05, 300)
