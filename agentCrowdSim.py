@@ -315,6 +315,7 @@ class WorldManager:
         return (x, y) in self.seating_pixels
 
     def closest_goal(self, pos):
+        return self.goals[randint(0,len(self.goals)-1)]
         best = 0
         distance = 1e100
         for i,g in enumerate(self.goals):
@@ -325,7 +326,13 @@ class WorldManager:
     
     def get_path(self, pos, goal):
         if str((pos[0],pos[1],goal[0],goal[1])) in self.paths:
-            return self.paths[str((pos[0],pos[1],goal[0],goal[1]))]
+            path = [pos]
+            for _ in range(AGENT_PATH_LOOKAHEAD):
+                p = self.paths[str((path[-1][0],path[-1][1],goal[0],goal[1]))]
+                if p == None:
+                    break
+                path.append(p)
+            return path
 
     def compute_paths(self, goal):
         # Djikstra's algorithm
@@ -356,12 +363,10 @@ class WorldManager:
                             break
         
         for node in visited:
-            last_node = node
-            path = [last_node.pos]
-            while last_node.parent != None:
-                last_node = last_node.parent
-                path.append(last_node.pos)
-            self.paths[str((node.pos[0], node.pos[1], goal[0], goal[1]))] = path
+            if node.parent != None:
+                self.paths[str((node.pos[0], node.pos[1], goal[0], goal[1]))] = node.parent.pos
+            else:
+                self.paths[str((node.pos[0], node.pos[1], goal[0], goal[1]))] = None
 
     def neighbors(self, pos):
         return [
@@ -430,11 +435,12 @@ agent_collisions = AgentCollisionManager(WORLD_EXTENTS[0], WORLD_EXTENTS[1])
 def run_sim(percent_filled, time):
     agents = []
 
-    for pos in world_collisions.seating_pixels:
-        if random() < percent_filled:
-            a = Agent((pos[0] + 0.5, pos[1] + 0.5), AGENT_STEP, world_collisions.closest_goal(pos))
-            agents.append(a)
-            agent_collisions.register_member(a)
+    for gridpos in world_collisions.seating_pixels:
+        for pos in [[gridpos[0]-0.25, gridpos[1]-0.25],[gridpos[0]-0.25, gridpos[1]+0.25],[gridpos[0]+0.25, gridpos[1]-0.25],[gridpos[0]+0.25, gridpos[1]+0.25]]:
+            if random() < percent_filled:
+                a = Agent((pos[0] + 0.5, pos[1] + 0.5), AGENT_STEP, world_collisions.closest_goal(pos))
+                agents.append(a)
+                agent_collisions.register_member(a)
     print(len(agents))
 
     agent_positions = [[] for _ in range(len(agents))]
@@ -446,7 +452,7 @@ def run_sim(percent_filled, time):
     height, width, layers = frame.shape
 
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    video = cv2.VideoWriter("movement.mp4", fourcc, 15, (width, height))
+    video = cv2.VideoWriter("movement.mp4", fourcc, 30, (width, height))
 
     for t in range(time):
         print(str((t+1)/time * 100) + "%")
@@ -475,4 +481,4 @@ def run_sim(percent_filled, time):
     plt.show()
 
 if __name__ == "__main__":
-    run_sim(0.01, 200)
+    run_sim(0.05, 2000)
