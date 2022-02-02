@@ -89,7 +89,7 @@ class Agent:
 
         nearby_people = agent_collisions.get_all_collision_considerations(self.collision_grid_pos)
         
-        if len(nearby_people) < AGENT_THICK_CROWD_THRESHOLD and len(nearby_people) > AGENT_CROWD_THRESHOLD and self.stuck_factor >= 2*AGENT_STUCK_THRESHOLD:
+        if len(nearby_people) > AGENT_CROWD_THRESHOLD and self.stuck_factor >= 10*AGENT_STUCK_THRESHOLD:
             self.desired_location = world_collisions.random_goal()
             self.stuck_factor = 0
             self.update()
@@ -154,7 +154,7 @@ class Agent:
         global moves
         global arcs
         illegal_directions = set()
-        if len(people) >= AGENT_THICK_CROWD_THRESHOLD:
+        if len(people) >= AGENT_CROWD_THRESHOLD:
             for arc in arcs:
                 n = self.next_position(arc)
                 if not self.is_legal_move(n, people):
@@ -451,10 +451,10 @@ def run_sim(percent_filled, time, draw_interval = 1, pathing = "random"):
     return (t+1) * AGENT_STEP/1.4
 
 if __name__ == "__main__":
-    max_time = 30*60*4 # half an hour
+    max_time = 30*60*4 # ~half an hour
 
     # cProfile.run("run_sim(1.0, max_time, draw_interval = 20)","profilestats")
     with open("results.txt","w") as f:
-        random_100 = run_sim(1.0, max_time, draw_interval = 10, pathing = 'random')
+        random_100 = run_sim(1.0, max_time, draw_interval = 10, pathing = 'closest')
         print(f"the agents exited the stadium in {random_100} seconds")
         f.write(str(random_100) + "\n")
