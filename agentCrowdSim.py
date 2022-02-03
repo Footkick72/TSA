@@ -1,4 +1,6 @@
 # https://arxiv.org/pdf/1708.03080.pdf
+# https://www.google.com/url?sa=t&rct=j&q=&esrc=s&source=web&cd=&cad=rja&uact=8&ved=2ahUKEwjFlNOipOL1AhXnjokEHU6LAnUQFnoECA0QAw&url=https%3A%2F%2Fwww.sciencedirect.com%2Fscience%2Farticle%2Fpii%2FS2352146520304804%2Fpdf%3Fmd5%3D7efbb0aed0d1a2cdec7d2fb6d040f632%26pid%3D1-s2.0-S2352146520304804-main.pdf&usg=AOvVaw3A5ZPzSHEk03XlNIj-TR3C
+
 from math import *
 from typing import List, Sequence
 import matplotlib.pyplot as plt
@@ -228,6 +230,7 @@ class WorldManager:
     illegal_pixels = set()
     seating_pixels = set()
     goals = []
+    ideal_goals = {}
     paths = {}
 
     def __init__(self, image):
@@ -241,6 +244,7 @@ class WorldManager:
                     self.seating_pixels.add((float(x), float(y)))
                 if px[0] == 0 and px[1] == 255 and px[2] == 0:
                     self.goals.append((x, y))
+        self.compute_ideal_goals()
     
     def read_paths(self):
         if os.path.exists(WORLD_FILE[:-4] + "-pathdata.json"):
@@ -268,6 +272,34 @@ class WorldManager:
         y = floor(point[1])
         return (x, y) in self.seating_pixels
 
+    def compute_ideal_goals(self):
+        if os.path.exists(WORLD_FILE[:-4] + "-exitdata.json"):
+            f = open(WORLD_FILE[:-4] + "-exitdata.json", "r")
+            self.ideal_goals = json.loads(f.read())
+            f.close()
+        else:
+            goal_preferences = [[] for _ in range(len(self.goals))]
+            for i in range(len(self.goals)):
+                for pos in self.seating_pixels:
+                    goal_preferences[i].append([(pos[0]-self.goals[i][0])**2 + (pos[1]-self.goals[i][1])**2, pos])
+                goal_preferences[i].sort(key=lambda x: x[0])
+            
+            assigned = set()
+            goal_considered = [0 for _ in range(len(self.goals))]
+            i = 0
+            while len(assigned) < len(self.seating_pixels):
+                while goal_preferences[i][goal_considered[i]][1] in assigned:
+                    goal_considered[i] +=1
+                assigned.add(goal_preferences[i][goal_considered[i]][1])
+                self.ideal_goals[str(goal_preferences[i][goal_considered[i]][1])] = self.goals[i]
+                i = (i+1)%len(self.goals)
+            
+            with open(WORLD_FILE[:-4] + "-exitdata.json", "w") as f:
+                f.write(json.dumps(self.ideal_goals))
+    
+    def smart_closest_goal(self, pos):
+        return self.ideal_goals[str((float(floor(pos[0])),float(floor(pos[1]))))]
+    
     def closest_goal(self, pos):
         best = 0
         distance = 1e100
@@ -285,6 +317,8 @@ class WorldManager:
             return self.random_goal()
         elif mode == "closest":
             return self.closest_goal(pos)
+        elif mode == "smartclosest":
+            return self.smart_closest_goal(pos)
     
     def get_path(self, pos, goal):
         if str((pos[0],pos[1],goal[0],goal[1])) in self.paths:
@@ -295,6 +329,8 @@ class WorldManager:
                     break
                 path.append(p)
             return path
+        else:
+            print(str((pos[0],pos[1],goal[0],goal[1])))
 
     def compute_paths(self, goal):
         # Djikstra's algorithm
@@ -398,9 +434,9 @@ def run_sim(percent_filled, time, draw_interval = 1, pathing = "random"):
     agents = []
 
     for gridpos in world_collisions.seating_pixels:
-        for pos in [[gridpos[0]-0.25, gridpos[1]-0.25],[gridpos[0]-0.25, gridpos[1]+0.25],[gridpos[0]+0.25, gridpos[1]-0.25],[gridpos[0]+0.25, gridpos[1]+0.25]]:
+        for pos in [[gridpos[0]+0.25, gridpos[1]+0.25],[gridpos[0]+0.25, gridpos[1]+0.75],[gridpos[0]+0.75, gridpos[1]+0.25],[gridpos[0]+0.75, gridpos[1]+0.75]]:
             if random() < percent_filled:
-                a = Agent((pos[0] + 0.5, pos[1] + 0.5), AGENT_STEP, world_collisions.assign_goal(pathing,pos))
+                a = Agent((pos[0], pos[1]), AGENT_STEP, world_collisions.assign_goal(pathing,pos))
                 agents.append(a)
                 agent_collisions.register_member(a)
     print(f"simulating {len(agents)} agents")
@@ -455,6 +491,6 @@ if __name__ == "__main__":
 
     # cProfile.run("run_sim(1.0, max_time, draw_interval = 20)","profilestats")
     with open("results.txt","w") as f:
-        random_100 = run_sim(1.0, max_time, draw_interval = 10, pathing = 'closest')
+        random_100 = run_sim(0.5, max_time, draw_interval = 10, pathing = 'random')
         print(f"the agents exited the stadium in {random_100} seconds")
         f.write(str(random_100) + "\n")

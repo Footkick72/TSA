@@ -4,3 +4,4 @@ temp.png
 .DS_Store
 results.txt
 data
+*-exitdata.json
