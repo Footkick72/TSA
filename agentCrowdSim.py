@@ -54,11 +54,13 @@ class Agent:
     path = None
     finished = False
     stuck_factor = 0
+    stay_put_timer = 0
 
-    def __init__(self, pos, speed, goal):
+    def __init__(self, pos, speed, goal, time):
         self.x_pos, self.y_pos = pos
         self.desired_step_size = speed
         self.desired_location = goal
+        self.stay_put_timer = time
         self.compute_path()
 
     def compute_path(self):
@@ -72,6 +74,10 @@ class Agent:
                 self.stuck_factor = 0
 
     def update(self):
+        if self.stay_put_timer > 0:
+            self.stay_put_timer -= AGENT_STEP/1.4
+            return
+
         assert not self.finished
 
         global agent_collisions
@@ -436,12 +442,13 @@ def run_sim(percent_filled, time, draw_interval = 1, pathing = "random"):
     for gridpos in world_collisions.seating_pixels:
         for pos in [[gridpos[0]+0.25, gridpos[1]+0.25],[gridpos[0]+0.25, gridpos[1]+0.75],[gridpos[0]+0.75, gridpos[1]+0.25],[gridpos[0]+0.75, gridpos[1]+0.75]]:
             if random() < percent_filled:
-                a = Agent((pos[0], pos[1]), AGENT_STEP, world_collisions.assign_goal(pathing,pos))
+                a = Agent((pos[0], pos[1]), AGENT_STEP, world_collisions.assign_goal(pathing,pos), 0)
                 agents.append(a)
                 agent_collisions.register_member(a)
     print(f"simulating {len(agents)} agents")
 
     agent_positions = [[] for _ in range(len(agents))]
+    agent_counts = []
 
     plt.imshow(plt.imread(WORLD_FILE), extent=[0, WORLD_EXTENTS[0], 0, WORLD_EXTENTS[1]])
     plt.savefig("temp.png")
@@ -455,8 +462,10 @@ def run_sim(percent_filled, time, draw_interval = 1, pathing = "random"):
     for t in range(time):
         print(str((t+1)/time * 100) + "%")
         done = True
+        c = 0
         for i, a in enumerate(agents):
             if not a.finished:
+                c += 1
                 done = False
                 a.update()
                 if a.finished:
@@ -464,6 +473,7 @@ def run_sim(percent_filled, time, draw_interval = 1, pathing = "random"):
                     continue
                 if t%draw_interval == 0:
                     agent_positions[i].append((a.x_pos, a.y_pos))
+        agent_counts.append(c)
         
         if done:
             break
@@ -484,6 +494,8 @@ def run_sim(percent_filled, time, draw_interval = 1, pathing = "random"):
     plt.imshow(plt.imread(WORLD_FILE), extent=[0, WORLD_EXTENTS[0], 0, WORLD_EXTENTS[1]])
     plt.show()
 
+    print(agent_counts)
+
     return (t+1) * AGENT_STEP/1.4
 
 if __name__ == "__main__":
@@ -491,6 +503,6 @@ if __name__ == "__main__":
 
     # cProfile.run("run_sim(1.0, max_time, draw_interval = 20)","profilestats")
     with open("results.txt","w") as f:
-        random_100 = run_sim(0.5, max_time, draw_interval = 10, pathing = 'random')
+        random_100 = run_sim(1.0, max_time, draw_interval = 10, pathing = 'random')
         print(f"the agents exited the stadium in {random_100} seconds")
         f.write(str(random_100) + "\n")
